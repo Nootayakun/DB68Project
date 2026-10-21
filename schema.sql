@@ -61,6 +61,17 @@ CREATE TABLE class_equipment (
     FOREIGN KEY (equip_id) REFERENCES equipment(equip_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- 7. ตารางบันทึกการชำระเงินของสมาชิก (member_payment)
+CREATE TABLE member_payment (
+    payment_id INT AUTO_INCREMENT PRIMARY KEY,
+    member_id INT NOT NULL,
+    amount DECIMAL(10,2) NOT NULL CHECK (amount > 0),
+    payment_method ENUM('cash', 'transfer', 'card') NOT NULL,
+    paid_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    note VARCHAR(255),
+    FOREIGN KEY (member_id) REFERENCES member(member_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 -- ============================================================
 -- INSERT ข้อมูลตัวอย่างสำหรับทดสอบระบบ
 -- ============================================================
@@ -73,6 +84,11 @@ INSERT INTO member (name, gender, join_date, package_type) VALUES
 ('จิราภรณ์ แข็งแรง', 'Female', '2026-01-25', 'basic'),
 ('ปกรณ์ ฟิตเนส', 'Male', '2026-02-01', 'Premium');
 
+-- เพิ่มข้อมูลการชำระเงินตัวอย่าง
+INSERT INTO member_payment (member_id, amount, payment_method, note) VALUES
+(1, 1200.00, 'transfer', 'ค่าสมาชิก'),
+(2, 2500.00, 'cash', 'ค่าสมาชิก'),
+(3, 2500.00, 'card', 'ค่าสมาชิก');
 
 -- เพิ่มเทรนเนอร์ (3 คน)
 INSERT INTO trainer (name, specialty, phone) VALUES
