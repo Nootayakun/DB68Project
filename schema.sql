@@ -24,12 +24,12 @@ CREATE TABLE trainer (
 -- 3. ตารางคลาสเรียน (gym_class)
 CREATE TABLE gym_class (
     class_id INT AUTO_INCREMENT PRIMARY KEY,
-    trainer_id INT,
+    trainer_id INT NOT NULL,
     name VARCHAR(100) NOT NULL,
     room VARCHAR(50),
     capacity INT NOT NULL CHECK (capacity > 0),
     schedule_time DATETIME NOT NULL,
-    FOREIGN KEY (trainer_id) REFERENCES trainer(trainer_id) ON DELETE SET NULL
+    FOREIGN KEY (trainer_id) REFERENCES trainer(trainer_id) ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
 -- 4. ตารางการจอง (booking)
@@ -48,14 +48,15 @@ CREATE TABLE equipment (
     equip_id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     zone VARCHAR(50),
-    status VARCHAR(50) DEFAULT 'available'
+    status VARCHAR(50) NOT NULL DEFAULT 'Available',
+    stock_quantity INT NOT NULL DEFAULT 0 CHECK (stock_quantity >= 0)
 ) ENGINE=InnoDB;
 
 -- 6. ตารางเชื่อมคลาสและอุปกรณ์ (class_equipment)
 CREATE TABLE class_equipment (
     class_id INT NOT NULL,
     equip_id INT NOT NULL,
-    quantity INT NOT NULL DEFAULT 1,
+    quantity INT NOT NULL DEFAULT 1 CHECK (quantity > 0),
     PRIMARY KEY (class_id, equip_id),
     FOREIGN KEY (class_id) REFERENCES gym_class(class_id) ON DELETE CASCADE,
     FOREIGN KEY (equip_id) REFERENCES equipment(equip_id) ON DELETE CASCADE
@@ -117,6 +118,14 @@ INSERT INTO equipment (name, zone, status) VALUES
 ('Dumbbell Set', 'Zone A', 'Available'),
 ('Yoga Mat', 'Zone B', 'Available'),
 ('Kettlebell', 'Zone A', 'Available');
+
+UPDATE equipment
+SET stock_quantity = CASE name
+    WHEN 'Dumbbell Set' THEN 10
+    WHEN 'Yoga Mat' THEN 20
+    WHEN 'Kettlebell' THEN 20
+    ELSE stock_quantity
+END;
 
 -- จับคู่อุปกรณ์กับคลาสเรียน
 INSERT INTO class_equipment (class_id, equip_id, quantity) VALUES

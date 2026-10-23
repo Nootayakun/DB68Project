@@ -96,6 +96,10 @@ def classes_list():
     filters = {k: v for k, v in request.args.items() if v}
     return safe(db.search_classes, filters)
 
+@app.route("/api/equipment-options", methods=["GET"])
+def equipment_options():
+    return safe(db.list_available_equipment)
+
 @app.route("/api/classes/<int:_id>", methods=["GET"])
 def class_get(_id):
     return safe(db.get_class, _id)
@@ -134,6 +138,28 @@ def booking_update(_id):
 def booking_delete(_id):
     return safe(db.delete_booking, _id)
 
+# ---- การชำระเงิน ----
+@app.route("/api/payments", methods=["GET"])
+def payments_list():
+    filters = {k: v for k, v in request.args.items() if v}
+    return safe(db.search_payments, filters)
+
+@app.route("/api/payments/<int:_id>", methods=["GET"])
+def payment_get(_id):
+    return safe(db.get_payment, _id)
+
+@app.route("/api/payments", methods=["POST"])
+def payment_create():
+    return safe(db.create_payment, request.json)
+
+@app.route("/api/payments/<int:_id>", methods=["PUT"])
+def payment_update(_id):
+    return safe(db.update_payment, _id, request.json)
+
+@app.route("/api/payments/<int:_id>", methods=["DELETE"])
+def payment_delete(_id):
+    return safe(db.delete_payment, _id)
+
 
 # ---- รายงาน ----
 @app.route("/api/reports/summary")
@@ -150,6 +176,8 @@ def report_run(key):
     """รันรายงานตามชื่อ เช่น /api/reports/overdue"""
     for k, _, fn in db.REPORTS:
         if k == key:
+            if k == "class-equipment":
+                return safe(fn, request.args.get("class_id"))
             return safe(fn)
     return jsonify({"ok": False, "error": f"ไม่พบรายงาน '{key}' ใน db.REPORTS"}), 404
 

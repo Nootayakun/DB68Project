@@ -28,6 +28,7 @@ body{font-family:"Segoe UI",Tahoma,sans-serif;background:#EEF2F8;color:var(--ink
 .field input,.field select{width:100%;padding:9px 11px;border:1px solid var(--line);
   border-radius:8px;font-size:14px;font-family:inherit}
 .field input:focus,.field select:focus{outline:none;border-color:var(--navy2)}
+.report-filter{margin:0 0 10px 8px;padding:8px;border:1px solid var(--line);border-radius:8px;font:inherit}
 
 .btn-row{display:flex;gap:10px;flex-wrap:wrap}
 .btn{padding:9px 18px;border:1px solid var(--line);background:#fff;border-radius:8px;
@@ -65,3 +66,4 @@ tr:nth-child(even) td{background:var(--tint)}
 .form-section{margin:18px 0 10px;padding-top:12px;border-top:1px dashed var(--line);
   font-size:14px;font-weight:700;color:var(--navy)}
 #formFields .field{margin-bottom:10px}
+.form-hint{margin:0 0 12px;color:var(--mute);font-size:13px}

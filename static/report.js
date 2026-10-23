@@ -31,10 +31,36 @@ async function loadAll() {
     const id = "rep_" + rep.key.replace(/\W/g, "_");
     const sec = document.createElement("section");
     sec.className = "card";
-    sec.innerHTML = '<h3>' + rep.title + '</h3><div id="' + id + '_status" class="status"></div>' +
+    sec.innerHTML = '<h3>' + rep.title + '</h3>' +
+      (rep.key === "class-equipment"
+        ? '<label for="classEquipmentFilter">เลือกคลาส: </label><select class="report-filter" id="classEquipmentFilter"><option value="">ทุกคลาส</option></select>'
+        : '') +
+      '<div id="' + id + '_status" class="status"></div>' +
       '<div class="table-wrap"><table id="' + id + '_table"><thead></thead><tbody></tbody></table></div>';
     $("#reports").appendChild(sec);
-    fillTable("#" + id + "_table", "#" + id + "_status", await api("/api/reports/" + rep.key));
+    const reportUrl = "/api/reports/" + rep.key;
+    if (rep.key === "class-equipment") {
+      const classes = await api("/api/classes");
+      if (!classes.ok) {
+        fillTable("#" + id + "_table", "#" + id + "_status", classes);
+        continue;
+      }
+      const filter = $("#classEquipmentFilter");
+      for (const gymClass of classes.data || []) {
+        const option = document.createElement("option");
+        option.value = gymClass.class_id;
+        option.textContent = gymClass.name;
+        filter.appendChild(option);
+      }
+      filter.onchange = async () => {
+        const params = new URLSearchParams();
+        if (filter.value) params.set("class_id", filter.value);
+        const query = params.toString();
+        fillTable("#" + id + "_table", "#" + id + "_status",
+          await api(reportUrl + (query ? "?" + query : "")));
+      };
+    }
+    fillTable("#" + id + "_table", "#" + id + "_status", await api(reportUrl));
   }
 }
 loadAll();

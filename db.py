@@ -3,6 +3,8 @@
 #  มองหาคำว่า  # TODO  ทุกฟังก์ชัน — ใช้ %s เป็น placeholder เสมอ (กัน SQL injection)
 # ============================================================
 
+from datetime import datetime
+
 import mysql.connector
 import config
 
@@ -133,6 +135,12 @@ def update_trainer(trainer_id, data):
 
 
 def delete_trainer(trainer_id):
+    rows = run_query(
+        "SELECT COUNT(*) AS total FROM gym_class WHERE trainer_id = %s",
+        (trainer_id,)
+    )
+    if rows[0]["total"] > 0:
+        raise ValueError("ยังมีคลาสที่ใช้เทรนเนอร์คนนี้ กรุณาเปลี่ยนเทรนเนอร์ของคลาสก่อน")
     return run_command("DELETE FROM trainer WHERE trainer_id=%s", (trainer_id,))
 
 
@@ -162,9 +170,29 @@ def search_classes(filters):
     if filters.get("trainer_id"):
         sql += " AND g.trainer_id = %s"
         params.append(filters["trainer_id"])
+    if filters.get("equip_id"):
+        sql += """
+            AND EXISTS (
+                SELECT 1
+                FROM class_equipment ce
+                WHERE ce.class_id = g.class_id AND ce.equip_id = %s
+            )
+        """
+        params.append(filters["equip_id"])
         
     sql += " ORDER BY g.class_id DESC"
     return run_query(sql, params)
+
+
+def list_available_equipment():
+    return run_query(
+        """
+        SELECT equip_id, name
+        FROM equipment
+        WHERE status = 'Available' AND stock_quantity > 0
+        ORDER BY name
+        """
+    )
 
 
 def get_class(class_id):
@@ -173,32 +201,54 @@ def get_class(class_id):
 
 
 def create_class(data):
+    trainer_id = blank_to_none(data.get("trainer_id"))
+    if trainer_id is None:
+        raise ValueError("กรุณาเลือกเทรนเนอร์ประจำคลาส")
+    schedule_time = blank_to_none(data.get("schedule_time"))
+    if schedule_time is None:
+        raise ValueError("กรุณาเลือกวันและเวลาเรียน")
+    try:
+        datetime.strptime(schedule_time, "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        raise ValueError("กรุณากรอกวันและเวลาให้ถูกต้อง เช่น วันที่เลือก + เวลา 15:00")
+
     sql = """
         INSERT INTO gym_class (name, trainer_id, room, capacity, schedule_time)
         VALUES (%s, %s, %s, %s, %s)
     """
     params = (
         blank_to_none(data.get("name")), 
-        blank_to_none(data.get("trainer_id")), 
+        trainer_id,
         blank_to_none(data.get("room")), 
         blank_to_none(data.get("capacity")), 
-        blank_to_none(data.get("schedule_time"))
+        schedule_time
     )
     return run_command(sql, params)
 
 
 def update_class(class_id, data):
+    trainer_id = blank_to_none(data.get("trainer_id"))
+    if trainer_id is None:
+        raise ValueError("กรุณาเลือกเทรนเนอร์ประจำคลาส")
+    schedule_time = blank_to_none(data.get("schedule_time"))
+    if schedule_time is None:
+        raise ValueError("กรุณาเลือกวันและเวลาเรียน")
+    try:
+        datetime.strptime(schedule_time, "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        raise ValueError("กรุณากรอกวันและเวลาให้ถูกต้อง เช่น วันที่เลือก + เวลา 15:00")
+
     sql = """
         UPDATE gym_class 
-        SET name=%s, trainer_id=%s, room=%s, capacity=%s, schedule_time=%s 
+        SET name=%s, trainer_id=%s, room=%s, capacity=%s, schedule_time=%s
         WHERE class_id=%s
     """
     params = (
         blank_to_none(data.get("name")), 
-        blank_to_none(data.get("trainer_id")), 
+        trainer_id,
         blank_to_none(data.get("room")), 
         blank_to_none(data.get("capacity")), 
-        blank_to_none(data.get("schedule_time")), 
+        schedule_time,
         class_id
     )
     return run_command(sql, params)
@@ -349,6 +399,75 @@ def delete_booking(booking_id):
     return run_command("DELETE FROM booking WHERE booking_id=%s", (booking_id,))
 
 
+# ---------- การชำระเงิน (member_payment) ----------
+def search_payments(filters):
+    sql = """
+        SELECT p.*, m.name AS member_name
+        FROM member_payment p
+        INNER JOIN member m ON p.member_id = m.member_id
+        WHERE 1=1
+    """
+    params = []
+
+    if filters.get("member_id"):
+        sql += " AND p.member_id = %s"
+        params.append(filters["member_id"])
+    if filters.get("payment_method"):
+        sql += " AND p.payment_method = %s"
+        params.append(filters["payment_method"])
+
+    sql += " ORDER BY p.payment_id DESC"
+    return run_query(sql, params)
+
+
+def get_payment(payment_id):
+    rows = run_query(
+        "SELECT * FROM member_payment WHERE payment_id = %s",
+        (payment_id,)
+    )
+    return rows[0] if rows else None
+
+
+def create_payment(data):
+    sql = """
+        INSERT INTO member_payment (member_id, amount, payment_method, paid_at, note)
+        VALUES (%s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP), %s)
+    """
+    params = (
+        blank_to_none(data.get("member_id")),
+        blank_to_none(data.get("amount")),
+        blank_to_none(data.get("payment_method")),
+        blank_to_none(data.get("paid_at")),
+        blank_to_none(data.get("note"))
+    )
+    return run_command(sql, params)
+
+
+def update_payment(payment_id, data):
+    sql = """
+        UPDATE member_payment
+        SET member_id=%s, amount=%s, payment_method=%s,
+            paid_at=COALESCE(%s, paid_at), note=%s
+        WHERE payment_id=%s
+    """
+    params = (
+        blank_to_none(data.get("member_id")),
+        blank_to_none(data.get("amount")),
+        blank_to_none(data.get("payment_method")),
+        blank_to_none(data.get("paid_at")),
+        blank_to_none(data.get("note")),
+        payment_id
+    )
+    return run_command(sql, params)
+
+
+def delete_payment(payment_id):
+    return run_command(
+        "DELETE FROM member_payment WHERE payment_id=%s",
+        (payment_id,)
+    )
+
+
 # ============================================================
 #  REPORT (รายงาน)
 # ============================================================
@@ -360,7 +479,8 @@ def report_summary():
             (SELECT COUNT(*) FROM trainer) AS 'เทรนเนอร์',
             (SELECT COUNT(*) FROM booking WHERE status = 'booked') AS 'การจอง',
             (SELECT COUNT(*) FROM equipment WHERE status = 'available') AS 'อุปกรณ์ที่พร้อมใช้',
-            (SELECT IFNULL(SUM(capacity), 0) FROM gym_class) AS 'ความจุผู้เรียนทั้งหมด'
+            (SELECT IFNULL(SUM(capacity), 0) FROM gym_class) AS 'ความจุผู้เรียนทั้งหมด',
+            (SELECT IFNULL(SUM(amount), 0) FROM member_payment) AS 'รายรับทั้งหมด'
     """
     return run_query(sql)[0]
 
@@ -401,14 +521,47 @@ def report_trainers_above_avg():
     return run_query(sql)
 
 
-def report_class_equipment():
+def report_class_equipment(class_id=None):
     """🧰 อุปกรณ์ที่ใช้ในแต่ละคลาส (Join 3 Tables)"""
     sql = """
-        SELECT g.name AS 'ชื่อคลาส', e.name AS 'ชื่ออุปกรณ์', ce.quantity AS 'จำนวนที่ใช้'
+        SELECT g.name AS 'ชื่อคลาส',
+               e.name AS 'ชื่ออุปกรณ์',
+               ce.quantity AS 'จำนวนที่ต้องใช้',
+               e.stock_quantity AS 'จำนวนที่มี',
+               e.stock_quantity - ce.quantity AS 'เหลือหลังจัดคลาส',
+               CASE
+                   WHEN e.stock_quantity >= ce.quantity THEN 'เพียงพอ'
+                   ELSE 'ไม่เพียงพอ'
+               END AS 'สถานะอุปกรณ์'
         FROM class_equipment ce
         INNER JOIN gym_class g ON ce.class_id = g.class_id
         INNER JOIN equipment e ON ce.equip_id = e.equip_id
-        ORDER BY g.name ASC
+    """
+    params = []
+    if class_id:
+        sql += " WHERE ce.class_id = %s"
+        params.append(class_id)
+    sql += " ORDER BY g.name ASC"
+    return run_query(sql, params)
+
+
+def report_payments():
+    """💰 รายการชำระเงินของสมาชิก"""
+    sql = """
+        SELECT
+            p.payment_id AS 'รหัสรายการ',
+            m.name AS 'สมาชิก',
+            p.amount AS 'จำนวนเงิน',
+            CASE p.payment_method
+                WHEN 'cash' THEN 'เงินสด'
+                WHEN 'transfer' THEN 'โอนเงิน'
+                WHEN 'card' THEN 'บัตร'
+            END AS 'วิธีชำระ',
+            p.paid_at AS 'วันที่ชำระ',
+            p.note AS 'หมายเหตุ'
+        FROM member_payment p
+        INNER JOIN member m ON p.member_id = m.member_id
+        ORDER BY p.paid_at DESC, p.payment_id DESC
     """
     return run_query(sql)
 
@@ -420,4 +573,5 @@ REPORTS = [
     ("popular-classes", "📈 คลาสยอดนิยม (Most Booked)", report_popular_classes),
     ("top-trainers", "🏅 เทรนเนอร์ที่มีผู้จองมากกว่าค่าเฉลี่ย (Above Average)", report_trainers_above_avg),
     ("class-equipment", "🧰 อุปกรณ์ที่ใช้ในแต่ละคลาส (Join 3 Tables)", report_class_equipment),
+    ("payments", "💰 รายการชำระเงิน", report_payments),
 ]

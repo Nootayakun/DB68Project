@@ -2,9 +2,7 @@
 //  app.js  —  ตรรกะหน้าเว็บ (ทำให้เสร็จแล้ว ★ นิสิตไม่ต้องแก้)
 //  ปรับช่องค้นหา/ฟอร์มได้ที่ตัวแปร ENTITIES ด้านล่าง
 // ============================================================
-// ★ ตัวอย่าง dropdown ที่อ่านข้อมูลจากฐานข้อมูล: ฟอร์ม "การจอง" ช่อง class_id
-//   แสดง name แต่ส่งค่าเป็น class_id (อ่านรายการจาก /api/classes)
-//   ช่อง FK อื่น ๆ ทำแบบเดียวกันได้ — เปลี่ยน "type": "number" เป็น select + optionsFrom
+// ฟอร์มการจองรับชื่อคลาส แล้วจับคู่เป็น class_id ก่อนส่งให้ API
 const ENTITIES = {
   "members": {
     "label": "สมาชิก",
@@ -104,7 +102,7 @@ const ENTITIES = {
         "key": "trainer_id",
         "label": "เทรนเนอร์",
         "type": "select",
-        "includeEmpty": true,
+        "required": true,
         "optionsFrom": {
           "api": "/api/trainers",
           "value": "trainer_id",
@@ -123,8 +121,9 @@ const ENTITIES = {
       },
       {
         "key": "schedule_time",
-        "label": "เวลา",
-        "type": "text"
+        "label": "วันและเวลาเรียน (พิมพ์เวลา เช่น 15:00)",
+        "type": "datetime-manual",
+        "required": true
       }
     ]
   },
@@ -161,14 +160,23 @@ const ENTITIES = {
         "type": "number"
       },
       {
-        "key": "class_id",
-        "label": "คลาส",
+        "key": "equip_id",
+        "label": "เลือกอุปกรณ์ (ไม่บังคับ)",
         "type": "select",
+        "filterOnly": true,
+        "includeEmpty": true,
+        "placeholder": "-- ทุกอุปกรณ์ --",
         "optionsFrom": {
-          "api": "/api/classes",
-          "value": "class_id",
+          "api": "/api/equipment-options",
+          "value": "equip_id",
           "label": "name"
         }
+      },
+      {
+        "key": "class_name",
+        "label": "ชื่อคลาส",
+        "type": "text",
+        "required": true
       },
       {
         "key": "book_date",
@@ -225,6 +233,92 @@ const ENTITIES = {
         "type": "tel"
       }
     ]
+  },
+  "payments": {
+    "label": "ชำระเงิน",
+    "api": "/api/payments",
+    "idKey": "payment_id",
+    "search": [
+      {
+        "key": "member_id",
+        "label": "สมาชิก",
+        "type": "select",
+        "optionsFrom": {
+          "api": "/api/members",
+          "value": "member_id",
+          "label": "name"
+        }
+      },
+      {
+        "key": "payment_method",
+        "label": "วิธีชำระ",
+        "type": "select",
+        "options": [
+          {
+            "value": "",
+            "label": "ทั้งหมด"
+          },
+          {
+            "value": "cash",
+            "label": "เงินสด"
+          },
+          {
+            "value": "transfer",
+            "label": "โอนเงิน"
+          },
+          {
+            "value": "card",
+            "label": "บัตร"
+          }
+        ]
+      }
+    ],
+    "form": [
+      {
+        "key": "member_id",
+        "label": "สมาชิก",
+        "type": "select",
+        "optionsFrom": {
+          "api": "/api/members",
+          "value": "member_id",
+          "label": "name"
+        }
+      },
+      {
+        "key": "amount",
+        "label": "จำนวนเงิน",
+        "type": "number"
+      },
+      {
+        "key": "payment_method",
+        "label": "วิธีชำระ",
+        "type": "select",
+        "options": [
+          {
+            "value": "cash",
+            "label": "เงินสด"
+          },
+          {
+            "value": "transfer",
+            "label": "โอนเงิน"
+          },
+          {
+            "value": "card",
+            "label": "บัตร"
+          }
+        ]
+      },
+      {
+        "key": "paid_at",
+        "label": "วันที่ชำระ",
+        "type": "date"
+      },
+      {
+        "key": "note",
+        "label": "หมายเหตุ",
+        "type": "text"
+      }
+    ]
   }
 };
 
@@ -248,11 +342,20 @@ const COLUMN_LABELS = {
   book_date: "วันที่จอง",
   member_name: "ชื่อสมาชิก",
   class_name: "ชื่อคลาส",
-  status: "สถานะ"
+  status: "สถานะ",
+  payment_id: "รหัสชำระเงิน",
+  amount: "จำนวนเงิน",
+  payment_method: "วิธีชำระ",
+  cash: "เงินสด",
+  transfer: "โอนเงิน",
+  card: "บัตร",
+  paid_at: "วันที่ชำระ",
+  note: "หมายเหตุ"
 };
 
 let current = Object.keys(ENTITIES)[0];
 let editingId = null;
+let bookingClasses = [];
 const $ = (s) => document.querySelector(s);
 function setStatus(el, msg, cls = "") { el.className = "status " + cls; el.textContent = msg; }
 async function api(url, opts) { const res = await fetch(url, opts); return res.json(); }
@@ -260,15 +363,30 @@ async function api(url, opts) { const res = await fetch(url, opts); return res.j
 function fieldHtml(f, prefix, value = "") {
   if (f.type === "heading") return '<div class="form-section">' + f.label + '</div>';
   let input;
-  if (f.type === "select") {
+  if (f.type === "datetime-manual") {
+    const normalizedValue = String(value ?? "").replace("T", " ");
+    const dateValue = normalizedValue ? normalizedValue.slice(0, 10) : "";
+    const timeValue = normalizedValue.length >= 16 ? normalizedValue.slice(11, 16) : "";
+    input = '<input id="' + prefix + f.key + '_date" type="date" value="' + dateValue + '"' +
+      (f.required ? " required" : "") + '> ' +
+      '<input id="' + prefix + f.key + '_time" type="text" value="' + timeValue +
+      '" placeholder="เช่น 15:00" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" maxlength="5"' +
+      (f.required ? " required" : "") + '>';
+  } else if (f.type === "select") {
     // options เป็นข้อความ "a" หรือ {value, label} ก็ได้
-    input = '<select id="' + prefix + f.key + '">' +
+    input = '<select id="' + prefix + f.key + '"' + (f.required ? " required" : "") + '>' +
       f.options.map(o => {
         const v = typeof o === "object" ? o.value : o;
         const t = typeof o === "object" ? o.label : (o || "ทั้งหมด");
         return '<option value="' + v + '"' + (String(v) === String(value ?? "") ? " selected" : "") + '>' + t + '</option>';
       }).join("") + '</select>';
-  } else { input = '<input id="' + prefix + f.key + '" type="' + f.type + '" value="' + (value ?? "") + '">'; }
+  } else {
+    let inputValue = value ?? "";
+    if (f.type === "date" && value) inputValue = String(value).slice(0, 10);
+    if (f.type === "datetime-local" && value) inputValue = String(value).replace(" ", "T").slice(0, 16);
+    input = '<input id="' + prefix + f.key + '" type="' + f.type + '"' +
+      (f.required ? " required" : "") + ' value="' + inputValue + '">';
+  }
   return '<div class="field"><label>' + f.label + '</label>' + input + '</div>';
 }
 // ช่อง select ที่มี optionsFrom → ดึงตัวเลือกจาก API (เช่น รายชื่อหมวดหมู่จากฐานข้อมูล)
@@ -286,7 +404,8 @@ async function loadOptions(fields, forSearch) {
       });
     }
     if (forSearch && r.ok) f.options.unshift({ value: "", label: "ทั้งหมด" });
-    else if (f.includeEmpty && r.ok) f.options.unshift({ value: "", label: "ไม่ระบุ" });
+    else if (f.required && r.ok) f.options.unshift({ value: "", label: f.placeholder || "-- เลือก --" });
+    else if (f.includeEmpty && r.ok) f.options.unshift({ value: "", label: f.placeholder || "ไม่ระบุ" });
   }
 }
 // ช่องในฟอร์มที่ใช้อยู่ตอนนี้ (ช่อง editOnly แสดงเฉพาะตอนแก้ไข)
@@ -316,7 +435,12 @@ function renderTable(r) {
   head.innerHTML = cols.map(c => "<th>" + (COLUMN_LABELS[c] || c) + "</th>").join("") + "<th>จัดการ</th>";
   body.innerHTML = rows.map(row => {
     const id = row[ENTITIES[current].idKey];
-    return "<tr>" + cols.map(c => "<td>" + (row[c] ?? "—") + "</td>").join("") +
+    return "<tr>" + cols.map(c => {
+      const value = c === "payment_method"
+        ? ({ cash: "เงินสด", transfer: "โอนเงิน", card: "บัตร" }[row[c]] || row[c])
+        : row[c];
+      return "<td>" + (value ?? "—") + "</td>";
+    }).join("") +
       '<td><button class="btn sm" onclick="editRow(' + id + ')">แก้ไข</button> ' +
       '<button class="btn sm del" onclick="deleteRow(' + id + ')">ลบ</button></td></tr>';
   }).join("");
@@ -326,8 +450,48 @@ async function openForm(title, data = {}) {
   $("#modalTitle").textContent = title;
   $("#formFields").innerHTML = formFields().map(f => fieldHtml(f, "f_", data[f.key])).join("");
   $("#modal").classList.remove("hidden");
+  if (current === "bookings") {
+    $("#f_equip_id").addEventListener("change", () => loadBookingClasses());
+    await loadBookingClasses();
+    const existingClass = bookingClasses.find(gymClass => String(gymClass.class_id) === String(data.class_id));
+    if (existingClass) $("#f_class_name").value = existingClass.name;
+  }
 }
-function collectForm() { const d = {}; formFields().filter(f => f.key).forEach(f => d[f.key] = $("#f_" + f.key).value); return d; }
+async function loadBookingClasses() {
+  const params = new URLSearchParams();
+  const equipmentId = $("#f_equip_id").value;
+  if (equipmentId) params.set("equip_id", equipmentId);
+  const query = params.toString();
+  const result = await api("/api/classes" + (query ? "?" + query : ""));
+  if (!result.ok) {
+    alert((result.todo ? "🚧 " : "⚠️ ") + result.error);
+    bookingClasses = [];
+    return null;
+  }
+  bookingClasses = result.data || [];
+  return bookingClasses;
+}
+function collectForm() {
+  const d = {};
+  formFields().filter(f => f.key && !f.filterOnly).forEach(f => {
+    let value;
+    if (f.type === "datetime-manual") {
+      const date = $("#f_" + f.key + "_date");
+      const time = $("#f_" + f.key + "_time");
+      if (!date.checkValidity() || !time.checkValidity()) {
+        date.reportValidity();
+        time.reportValidity();
+        return;
+      }
+      value = date.value && time.value ? date.value + " " + time.value + ":00" : "";
+    } else {
+      value = $("#f_" + f.key).value;
+    }
+    d[f.key] = value;
+  });
+  if (formFields().some(f => f.type === "datetime-manual") && !d.schedule_time) return null;
+  return d;
+}
 async function editRow(id) {
   const cfg = ENTITIES[current];
   const r = await api(cfg.api + "/" + id);
@@ -342,6 +506,25 @@ async function deleteRow(id) {
 }
 async function save() {
   const cfg = ENTITIES[current], data = collectForm();
+  if (!data) return;
+  if (current === "bookings") {
+    const classes = await loadBookingClasses();
+    if (!classes) return;
+    const className = data.class_name.trim().toLocaleLowerCase();
+    const matches = classes.filter(gymClass =>
+      String(gymClass.name).trim().toLocaleLowerCase() === className
+    );
+    if (matches.length === 0) {
+      alert("ไม่พบคลาสชื่อนี้ กรุณาพิมพ์ชื่อคลาสให้ตรงกับชื่อในระบบ");
+      return;
+    }
+    if (matches.length > 1) {
+      alert("มีคลาสชื่อนี้หลายรายการ กรุณาเปลี่ยนชื่อคลาสให้ไม่ซ้ำในเมนูคลาสเรียนก่อนจอง");
+      return;
+    }
+    data.class_id = matches[0].class_id;
+    delete data.class_name;
+  }
   const opts = { method: editingId ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) };
   const r = await api(editingId ? cfg.api + "/" + editingId : cfg.api, opts);
   if (!r.ok) { alert((r.todo ? "🚧 " : "⚠️ ") + r.error); return; }
